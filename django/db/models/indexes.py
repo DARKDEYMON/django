@@ -14,9 +14,16 @@ class Index(object):
     suffix = 'idx'
 
     def __init__(self, fields=[], name=None):
+        if not isinstance(fields, list):
+            raise ValueError('Index.fields must be a list.')
         if not fields:
             raise ValueError('At least one field is required to define an index.')
         self.fields = fields
+        # A list of 2-tuple with the field name and ordering ('' or 'DESC').
+        self.fields_orders = [
+            (field_name[1:], 'DESC') if field_name.startswith('-') else (field_name, '')
+            for field_name in self.fields
+        ]
         self.name = name or ''
         if self.name:
             errors = self.check_name()
@@ -37,16 +44,19 @@ class Index(object):
             self.name = 'D%s' % self.name[1:]
         return errors
 
-    def create_sql(self, model, schema_editor):
-        fields = [model._meta.get_field(field) for field in self.fields]
+    def create_sql(self, model, schema_editor, using=''):
+        fields = [model._meta.get_field(field_name) for field_name, order in self.fields_orders]
         tablespace_sql = schema_editor._get_index_tablespace_sql(model, fields)
-        columns = [field.column for field in fields]
-
         quote_name = schema_editor.quote_name
+        columns = [
+            ('%s %s' % (quote_name(field.column), order)).strip()
+            for field, (field_name, order) in zip(fields, self.fields_orders)
+        ]
         return schema_editor.sql_create_index % {
             'table': quote_name(model._meta.db_table),
             'name': quote_name(self.name),
-            'columns': ', '.join(quote_name(column) for column in columns),
+            'columns': ', '.join(columns),
+            'using': using,
             'extra': tablespace_sql,
         }
 
@@ -82,8 +92,12 @@ class Index(object):
         fit its size by truncating the excess length.
         """
         table_name = model._meta.db_table
-        column_names = [model._meta.get_field(field).column for field in self.fields]
-        hash_data = [table_name] + column_names + [self.suffix]
+        column_names = [model._meta.get_field(field_name).column for field_name, order in self.fields_orders]
+        column_names_with_order = [
+            (('-%s' if order else '%s') % column_name)
+            for column_name, (field_name, order) in zip(column_names, self.fields_orders)
+        ]
+        hash_data = [table_name] + column_names_with_order + [self.suffix]
         self.name = '%s_%s_%s' % (
             table_name[:11],
             column_names[0][:7],

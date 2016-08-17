@@ -22,6 +22,10 @@ class IndexesTests(TestCase):
         self.assertEqual(index, same_index)
         self.assertNotEqual(index, another_index)
 
+    def test_index_fields_type(self):
+        with self.assertRaisesMessage(ValueError, 'Index.fields must be a list.'):
+            models.Index(fields='title')
+
     def test_raises_error_without_field(self):
         msg = 'At least one field is required to define an index.'
         with self.assertRaisesMessage(ValueError, msg):
@@ -45,6 +49,11 @@ class IndexesTests(TestCase):
         index = models.Index(fields=['author'])
         index.set_name_with_model(Book)
         self.assertEqual(index.name, 'model_index_author_0f5565_idx')
+
+        # '-' for DESC columns should be accounted for in the index name.
+        index = models.Index(fields=['-author'])
+        index.set_name_with_model(Book)
+        self.assertEqual(index.name, 'model_index_author_708765_idx')
 
         # fields may be truncated in the name. db_column is used for naming.
         long_field_index = models.Index(fields=['pages'])
